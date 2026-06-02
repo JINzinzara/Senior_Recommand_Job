@@ -1,4 +1,4 @@
-export const themeColors: {
+export declare const themeColors: {
   primary: { light: string; dark: string };
   background: { light: string; dark: string };
   surface: { light: string; dark: string };
@@ -8,10 +8,7 @@ export const themeColors: {
   success: { light: string; dark: string };
   warning: { light: string; dark: string };
   error: { light: string; dark: string };
+  accent: { light: string; dark: string };
+  inactive: { light: string; dark: string };
+  tint: { light: string; dark: string };
 };
-
-declare const themeConfig: {
-  themeColors: typeof themeColors;
-};
-
-export default themeConfig;
