@@ -1,6 +1,5 @@
 import {
   View,
-  Text,
   StyleSheet,
   FlatList,
   Pressable,
@@ -9,6 +8,7 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from "react-native";
+import { Text } from "@/components/text";
 import { useRouter } from "expo-router";
 import { useState, useEffect, useRef } from "react";
 import { ScreenContainer } from "@/components/screen-container";

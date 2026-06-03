@@ -5,6 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useFonts } from "expo-font";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { ThemeProvider as AppThemeProvider } from "@/lib/theme-provider";
@@ -20,9 +21,17 @@ export default function RootLayout() {
   const [queryClient] = useState(() => new QueryClient());
   const [trpcClient] = useState(() => createTRPCClient());
 
+  const [fontsLoaded] = useFonts({
+    JalnanGothic: require("../assets/fonts/JalnanGothicTTF.ttf"),
+  });
+
   useEffect(() => {
-    SplashScreen.hideAsync();
-  }, []);
+    if (fontsLoaded) {
+      SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded) return null;
 
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>

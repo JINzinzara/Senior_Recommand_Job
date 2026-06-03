@@ -1,4 +1,5 @@
-import { View, Text, Pressable, StyleSheet } from "react-native";
+import { View, Pressable, StyleSheet } from "react-native";
+import { Text } from "@/components/text";
 import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/use-colors";
 import * as Haptics from "expo-haptics";

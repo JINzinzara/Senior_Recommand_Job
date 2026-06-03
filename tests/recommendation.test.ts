@@ -77,7 +77,7 @@ describe("buildPrompt", () => {
       Q6: ["요양보호사 자격증"],
     };
     const ncsResult = surveyToNCS(answers);
-    const prompt = buildPrompt(answers, ncsResult);
+    const prompt = buildPrompt(answers, ncsResult, [], []);
     expect(prompt).toContain("친절하고 사람을 좋아해요");
     expect(prompt).toContain("요양보호사 자격증");
     expect(prompt).toContain("recommendations");
@@ -93,7 +93,7 @@ describe("buildPrompt", () => {
       Q6: [],
     };
     const ncsResult = surveyToNCS(answers);
-    const prompt = buildPrompt(answers, ncsResult);
+    const prompt = buildPrompt(answers, ncsResult, [], []);
     expect(prompt).toContain("없음");
   });
 });

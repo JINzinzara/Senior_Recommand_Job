@@ -1,18 +1,19 @@
 import {
   View,
-  Text,
   Pressable,
   StyleSheet,
   ScrollView,
   Animated,
   Platform,
 } from "react-native";
+import { Text } from "@/components/text";
 import { useRouter } from "expo-router";
 import { useState, useRef, useEffect } from "react";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Location from "expo-location";
 
 // 설문 데이터 정의
 const SURVEY_QUESTIONS = [
@@ -178,8 +179,28 @@ export default function SurveyScreen() {
           useNativeDriver: true,
         }).start();
       } else {
-        // 마지막 단계 - 결과 화면으로 이동
+        // 마지막 단계 - 위치 권한 요청 후 결과 화면으로 이동
         await AsyncStorage.setItem("surveyAnswers", JSON.stringify(answers));
+        try {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status === "granted") {
+            const pos = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            await AsyncStorage.setItem(
+              "userLocation",
+              JSON.stringify({
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude,
+              })
+            );
+          } else {
+            await AsyncStorage.removeItem("userLocation");
+          }
+        } catch {
+          // 위치 실패해도 추천은 계속 진행
+          await AsyncStorage.removeItem("userLocation");
+        }
         // @ts-ignore
         router.push("/loading");
       }

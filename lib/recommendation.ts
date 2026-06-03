@@ -1,4 +1,5 @@
 // 시니어 일자리 추천 로직 - Python 노트북에서 TypeScript로 포팅
+import { extractRegionFromText } from "./location";
 
 export type SurveyAnswers = {
   Q1: string[];
@@ -23,6 +24,16 @@ export type JobRecommendation = {
   모집요강: string;
   reason: string;
   matchRate?: number;
+};
+
+export type RawJob = {
+  채용공고명: string;
+  자격면허: string;
+  근무형태: string;
+  근무지역: string;
+  모집요강: string;
+  모집직종: string;
+  링크: string;
 };
 
 // NCS 직종 레지스트리
@@ -51,6 +62,48 @@ export const NCS_REGISTRY: Record<string, { name: string; group: string }> = {
   "21010108": { name: "곡류·서류·견과류가공",             group: "식품가공" },
   "24010103": { name: "채소재배",                       group: "농업" },
   "24010104": { name: "과수재배",                       group: "농업" },
+};
+
+// 공고 직종명 → NCS 그룹 매핑 (Colab의 CATEGORY_GROUP_MAP)
+export const CATEGORY_GROUP_MAP: Record<string, string> = {
+  // 돌봄·복지
+  "요양보호사":                                "돌봄·복지",
+  "요양보호사(노인요양사)":                     "돌봄·복지",
+  "재가 요양보호사":                           "돌봄·복지",
+  "사회복지사":                                "돌봄·복지",
+  "산후조리 종사원(산모 도우미)":               "돌봄·복지",
+
+  // 환경·청소
+  "건물 청소원":                               "환경·청소",
+  "건물 청소원(공공건물":                       "환경·청소",
+  "거리 및 공공장소 청소원(환경 미화원)":        "환경·청소",
+  "화학·환경·에너지 분야 단순 종사원":           "환경·청소",
+
+  // 경비·안전
+  "건물 경비원(청사":                          "경비·안전",
+  "아파트·빌라 경비원":                        "경비·안전",
+  "건물 관리원":                               "경비·안전",
+  "빌딩 관리소장":                             "경비·안전",
+  "공사현장 경비원":                           "경비·안전",
+  "기타 경호 및 보안 관련 종사원":              "경비·안전",
+  "주차 관리원 및 안내원":                      "경비·안전",
+  "주차 운전원":                               "경비·안전",
+
+  // 시장·판매
+  "단체 급식 보조원":                          "시장·판매",
+  "단체급식 조리사":                           "시장·판매",
+  "병원 급식 조리사":                          "시장·판매",
+  "유치원·어린이집 급식 조리사":                "시장·판매",
+  "주방 보조원":                               "시장·판매",
+
+  // 행정·사무
+  "협회·회원단체 사무원":                       "행정·사무",
+  "경영 및 진단 전문가(경영 컨설턴트":          "행정·사무",
+
+  // 식품가공
+  "식품공학 기술자 및 연구원":                  "식품가공",
+  "기타 제조 관련 단순 종사원":                 "식품가공",
+  "CNC 밀링기 조작원(NC 밀링기 조작원)":        "식품가공",
 };
 
 // Q1 태도 키워드 매핑
@@ -139,26 +192,20 @@ export function surveyToNCS(answers: SurveyAnswers): NCSResult {
   const q5 = answers.Q5 ?? "4~5일";
   const q6 = answers.Q6 ?? [];
 
-  // Q1 태도 키워드
   const attitudeKeywords: string[] = [];
   for (const choice of q1) {
-    const keywords = Q1_ATTITUDE_MAP[choice] ?? [];
-    attitudeKeywords.push(...keywords);
+    attitudeKeywords.push(...(Q1_ATTITUDE_MAP[choice] ?? []));
   }
 
-  // Q2 NCS 코드 (중복 제거)
   const rawCodes: string[] = [];
   for (const choice of q2) {
-    const codes = Q2_NCS_CODE_MAP[choice] ?? [];
-    for (const code of codes) {
+    for (const code of Q2_NCS_CODE_MAP[choice] ?? []) {
       if (!rawCodes.includes(code)) rawCodes.push(code);
     }
   }
 
-  // 하드 필터링
   const candidateCodes = applyHardFilters(rawCodes, q3, q4);
 
-  // Q6 자격증 부스트
   const boost: Record<string, number> = {};
   for (const cert of q6) {
     const entry = Q6_BOOST_MAP[cert];
@@ -172,67 +219,104 @@ export function surveyToNCS(answers: SurveyAnswers): NCSResult {
   return { attitudeKeywords, candidateCodes, boost, q5 };
 }
 
-// 프롬프트 생성 (서버에서 사용)
-export function buildPrompt(answers: SurveyAnswers, ncsResult: NCSResult): string {
-  const attitudeText = answers.Q1.join(", ");
-  const interestText = answers.Q2.join(", ");
-  const certText = answers.Q6.length > 0 ? answers.Q6.join(", ") : "없음";
-
-  // 후보 직종 목록 생성
-  const candidateGroups = new Set<string>();
+// 실제 공고 데이터를 설문 결과로 필터링 (Colab의 filtered_jobs)
+export function filterJobs(
+  jobs: RawJob[],
+  ncsResult: NCSResult
+): { mapped: RawJob[]; unmapped: RawJob[] } {
+  const targetGroups = new Set<string>();
   for (const code of ncsResult.candidateCodes) {
     const group = NCS_REGISTRY[code]?.group;
-    if (group) candidateGroups.add(group);
+    if (group) targetGroups.add(group);
   }
 
-  const candidateJobsText = ncsResult.candidateCodes
-    .map((code) => {
-      const ncs = NCS_REGISTRY[code];
-      const boostStr = ncsResult.boost[code] ? ` [자격증 우대 +${(ncsResult.boost[code] * 100).toFixed(0)}%]` : "";
-      return `- ${ncs?.name ?? code} (${ncs?.group ?? ""})${boostStr}`;
-    })
-    .join("\n");
+  const mapped: RawJob[] = [];
+  const unmapped: RawJob[] = [];
+
+  for (const job of jobs) {
+    const jobGroup = CATEGORY_GROUP_MAP[job.모집직종] ?? "";
+    if (jobGroup && targetGroups.has(jobGroup)) {
+      mapped.push(job);
+    } else {
+      unmapped.push(job);
+    }
+  }
+
+  return { mapped, unmapped };
+}
+
+// 사용자 위치 기반으로 mapped/unmapped 내부 정렬
+// 같은 시/도 공고를 앞으로 배치 — 나중에 실제 거리 계산 API로 교체 가능
+export function sortJobsByRegion(jobs: RawJob[], userRegion: string): RawJob[] {
+  if (!userRegion || userRegion === "전국") return jobs;
+  return [...jobs].sort((a, b) => {
+    const aMatch = extractRegionFromText(a.근무지역) === userRegion ? 0 : 1;
+    const bMatch = extractRegionFromText(b.근무지역) === userRegion ? 0 : 1;
+    return aMatch - bMatch;
+  });
+}
+
+// 중복 공고 제거
+export function deduplicateJobs(jobs: RawJob[]): RawJob[] {
+  const seen = new Set<string>();
+  return jobs.filter((job) => {
+    const key = `${job.채용공고명}|${job.모집직종}|${job.근무지역}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// 실제 공고 목록을 포함한 프롬프트 생성
+export function buildPrompt(
+  answers: SurveyAnswers,
+  ncsResult: NCSResult,
+  mappedJobs: RawJob[],
+  unmappedJobs: RawJob[],
+  userRegion?: string
+): string {
+  const certText = answers.Q6.length > 0 ? answers.Q6.join(", ") : "없음";
+  const regionText = userRegion && userRegion !== "전국" ? userRegion : undefined;
+
+  const mappedText = mappedJobs
+    .map((j) => `- ${j.채용공고명} / ${j.모집직종} / ${j.근무형태} / ${j.근무지역.slice(0, 30)}`)
+    .join("\n") || "없음";
+
+  const unmappedText = unmappedJobs
+    .map((j) => `- ${j.채용공고명} / ${j.모집직종} / ${j.근무형태} / ${j.근무지역.slice(0, 30)}`)
+    .join("\n") || "없음";
 
   return `당신은 노인 일자리 추천 전문가입니다.
+아래 고령자분의 설문 응답과 실제 공고 목록을 보고, 가장 적합한 공고 최대 5개를 추천해주세요.
 
 ## 설문 응답
-- 성격/태도: ${attitudeText}
-- 관심 일터: ${interestText}
+- 성격/태도: ${answers.Q1.join(", ")}
+- 관심 일터: ${answers.Q2.join(", ")}
 - 활동량: ${answers.Q3}
 - 선호 환경: ${answers.Q4}
 - 희망 근무일수: ${answers.Q5}
 - 보유 자격증: ${certText}
-- 태도 키워드: ${ncsResult.attitudeKeywords.join(", ")}
+- 태도 키워드: ${ncsResult.attitudeKeywords.join(", ")}${regionText ? `\n- 현재 위치: ${regionText} 근처` : ""}
 
-## 후보 직종 목록
-${candidateJobsText || "- 특별한 제한 없음 (모든 직종 고려)"}
+## 공고 목록 (분류된 직종)
+${mappedText}
+
+## 공고 목록 (직종 미분류 - 설문 응답과 직접 비교하여 적합한 공고 추천)
+${unmappedText}
 
 ## 지침
-1. 고령자분의 성격, 관심사, 신체 활동량, 보유 자격증을 종합적으로 고려하세요.
-2. 자격증 보유 표시가 있는 직종은 우선적으로 검토하세요.
-3. 설문 응답과 직종 간의 일치율을 계산하여 일치율이 높은 공고 최대 5개를 제시하세요.
-4. 추천 이유는 한 문장으로 간결하게 작성하세요 (20~30글자 이내).
-5. 희망 근무일수 "${answers.Q5}"를 반영하여 근무 조건을 설정하세요.
+1. 고령자분의 성격, 관심사, 신체 활동량, 보유 자격증을 종합적으로 고려하세요.${regionText ? `\n2. 현재 위치(${regionText})와 근무지역이 가까운 공고를 우선 추천하세요.` : ""}
+${regionText ? "3" : "2"}. 자격증 보유 표시가 있는 직종은 우선적으로 검토하세요.
+${regionText ? "4" : "3"}. 설문 응답과 공고 간의 일치율을 계산하여 일치율이 높은 공고 최대 5개를 제시하세요. 적합한 공고가 적으면 그 수만큼만 추천하세요.
+${regionText ? "5" : "4"}. 추천 이유는 한 문장으로 간결하게 작성하세요 (20~30글자 이내).
+${regionText ? "6" : "5"}. 추천 이유에서 근무 일수나 시간은 제외하세요.
+${regionText ? "7" : "6"}. '직종 미분류' 공고도 설문 응답과 직접 비교해서 적합하다고 판단되면 추천 목록에 포함하세요.
+${regionText ? "8" : "7"}. 반드시 아래 JSON 형식으로만 답변하세요. 다른 텍스트는 포함하지 마세요.
 
-## 응답 형식 (반드시 이 JSON 형식만 사용)
-다음 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
-
-\`\`\`json
 {
   "recommendations": [
-    {
-      "rank": 1,
-      "채용공고명": "공고제목",
-      "모집직종": "직종명",
-      "모집요강": "주 X일 근무, 시급 OOOO원",
-      "reason": "추천 이유",
-      "matchRate": 95
-    }
+    {"rank": 1, "채용공고명": "공고제목", "모집직종": "직종명", "모집요강": "근무 일수", "reason": "추천 이유", "matchRate": 95},
+    {"rank": 2, "채용공고명": "공고제목", "모집직종": "직종명", "모집요강": "근무 일수", "reason": "추천 이유", "matchRate": 85}
   ]
-}
-\`\`\`
-
-현실적인 가상의 공고를 생성하여 추천해주세요.
-공고명은 구체적이고 현실적으로 작성하세요 (예: "서울 노원구 요양보호사 모집", "강남구 어린이집 보육교사 보조").
-모집요강에는 근무 일수와 시급 정보를 포함하세요.`;
+}`;
 }

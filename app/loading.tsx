@@ -1,4 +1,7 @@
-import { View, Text, StyleSheet, Animated, Platform } from "react-native";
+import { View, StyleSheet, Animated, Platform, Text as RNText } from "react-native";
+import { Text } from "@/components/text";
+
+const AnimatedText = Animated.createAnimatedComponent(RNText);
 import { useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
 import { ScreenContainer } from "@/components/screen-container";
@@ -85,6 +88,11 @@ export default function LoadingScreen() {
         }
         const answers = JSON.parse(stored);
 
+        const locRaw = await AsyncStorage.getItem("userLocation");
+        const location = locRaw
+          ? (JSON.parse(locRaw) as { latitude: number; longitude: number })
+          : undefined;
+
         const result = await recommendMutation.mutateAsync({
           Q1: answers.Q1 ?? [],
           Q2: answers.Q2 ?? [],
@@ -92,6 +100,7 @@ export default function LoadingScreen() {
           Q4: answers.Q4 ?? "상관없음",
           Q5: answers.Q5 ?? "4~5일",
           Q6: answers.Q6 ?? [],
+          location,
         });
 
         await AsyncStorage.setItem(
@@ -166,14 +175,14 @@ export default function LoadingScreen() {
           맞춤 일자리를 찾고 있어요
         </Text>
 
-        <Animated.Text
+        <AnimatedText
           style={[
             styles.subtitle,
-            { color: "#8B6F47", opacity: messageAnim },
+            { color: "#8B6F47", opacity: messageAnim, fontFamily: "JalnanGothic" },
           ]}
         >
           {messageRef.current}
-        </Animated.Text>
+        </AnimatedText>
 
         {/* 점 인디케이터 */}
         <View style={styles.dotsContainer}>

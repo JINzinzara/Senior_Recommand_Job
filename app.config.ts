@@ -78,6 +78,12 @@ const config: ExpoConfig = {
   plugins: [
     "expo-router",
     [
+      "expo-location",
+      {
+        locationWhenInUsePermission: "주변 일자리를 찾기 위해 위치 정보가 필요합니다.",
+      },
+    ],
+    [
       "expo-audio",
       {
         microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
