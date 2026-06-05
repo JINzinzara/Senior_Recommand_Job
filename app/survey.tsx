@@ -13,9 +13,9 @@ import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Location from "expo-location";
+import { REGIONS, SIDO_LIST } from "@/constants/regions";
 
-// 설문 데이터 정의
+// Q1~Q6 설문 데이터
 const SURVEY_QUESTIONS = [
   {
     id: "Q1",
@@ -87,9 +87,15 @@ const SURVEY_QUESTIONS = [
     options: [
       { label: "사회복지사 1급/2급 자격증" },
       { label: "요양보호사 자격증" },
+      { label: "한식조리기능사" },
+      { label: "운전면허" },
+      { label: "경비원 신임교육 이수" },
     ],
   },
 ];
+
+// Q7: 시/도, Q8: 시/군/구 포함 총 단계
+const TOTAL_STEPS = SURVEY_QUESTIONS.length + 2; // +2 for Q7, Q8
 
 type Answers = {
   Q1: string[];
@@ -98,6 +104,8 @@ type Answers = {
   Q4: string;
   Q5: string;
   Q6: string[];
+  Q7: string;
+  Q8: string;
 };
 
 export default function SurveyScreen() {
@@ -111,114 +119,55 @@ export default function SurveyScreen() {
     Q4: "",
     Q5: "",
     Q6: [],
+    Q7: "",
+    Q8: "",
   });
 
   const progressAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
-  const totalSteps = SURVEY_QUESTIONS.length;
-  const currentQuestion = SURVEY_QUESTIONS[currentStep];
-  const questionKey = currentQuestion.id as keyof Answers;
-  const currentAnswers = answers[questionKey];
-  const selectedArray = Array.isArray(currentAnswers) ? currentAnswers : currentAnswers ? [currentAnswers] : [];
+  // Q7 단계: SURVEY_QUESTIONS.length (인덱스 6)
+  // Q8 단계: SURVEY_QUESTIONS.length + 1 (인덱스 7)
+  const isQ7Step = currentStep === SURVEY_QUESTIONS.length;
+  const isQ8Step = currentStep === SURVEY_QUESTIONS.length + 1;
+  const isLastStep = currentStep === TOTAL_STEPS - 1;
 
-  // 현재 질문에 답변이 있는지 확인
-  const isAnswered = currentQuestion.required
-    ? selectedArray.length > 0
-    : true; // Q6는 필수 아님
+  // 현재 질문 (Q1~Q6)
+  const currentQuestion = !isQ7Step && !isQ8Step ? SURVEY_QUESTIONS[currentStep] : null;
+  const questionKey = currentQuestion ? (currentQuestion.id as keyof Answers) : null;
+  const currentAnswers = questionKey ? answers[questionKey] : null;
+  const selectedArray = Array.isArray(currentAnswers)
+    ? currentAnswers
+    : currentAnswers
+    ? [currentAnswers]
+    : [];
+
+  // 현재 단계 답변 여부
+  const isAnswered = (() => {
+    if (isQ7Step) return answers.Q7 !== "";
+    if (isQ8Step) return answers.Q8 !== "";
+    if (!currentQuestion) return false;
+    return currentQuestion.required ? selectedArray.length > 0 : true;
+  })();
+
+  // Q8 선택지 (Q7 선택된 시/도에 따라 동적 변경)
+  const sigunguOptions = answers.Q7 ? REGIONS[answers.Q7] ?? [] : [];
 
   useEffect(() => {
     Animated.timing(progressAnim, {
-      toValue: (currentStep + 1) / totalSteps,
+      toValue: (currentStep + 1) / TOTAL_STEPS,
       duration: 400,
       useNativeDriver: false,
     }).start();
   }, [currentStep]);
 
-  const handleSelect = (option: string) => {
-    if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-
-    const maxSelect = currentQuestion.maxSelect;
-    const key = questionKey;
-
-    if (maxSelect === 1) {
-      setAnswers((prev) => ({ ...prev, [key]: option }));
-    } else {
-      setAnswers((prev) => {
-        const current = (prev[key] as string[]) ?? [];
-        if (current.includes(option)) {
-          return { ...prev, [key]: current.filter((o) => o !== option) };
-        } else if (current.length < maxSelect) {
-          return { ...prev, [key]: [...current, option] };
-        }
-        return prev;
-      });
-    }
-  };
-
-  const handleNext = async () => {
-    if (!isAnswered) return;
-
-    if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-
-    // 페이드 아웃
-    Animated.timing(fadeAnim, {
-      toValue: 0,
-      duration: 150,
-      useNativeDriver: true,
-    }).start(async () => {
-      if (currentStep < totalSteps - 1) {
-        setCurrentStep((prev) => prev + 1);
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }).start();
-      } else {
-        // 마지막 단계 - 위치 권한 요청 후 결과 화면으로 이동
-        await AsyncStorage.setItem("surveyAnswers", JSON.stringify(answers));
-        try {
-          const { status } = await Location.requestForegroundPermissionsAsync();
-          if (status === "granted") {
-            const pos = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-            await AsyncStorage.setItem(
-              "userLocation",
-              JSON.stringify({
-                latitude: pos.coords.latitude,
-                longitude: pos.coords.longitude,
-              })
-            );
-          } else {
-            await AsyncStorage.removeItem("userLocation");
-          }
-        } catch {
-          // 위치 실패해도 추천은 계속 진행
-          await AsyncStorage.removeItem("userLocation");
-        }
-        // @ts-ignore
-        router.push("/loading");
-      }
-    });
-  };
-
-  const handleBack = () => {
-    if (currentStep === 0) {
-      // @ts-ignore
-      router.back();
-      return;
-    }
+  const fadeTransition = (callback: () => void) => {
     Animated.timing(fadeAnim, {
       toValue: 0,
       duration: 150,
       useNativeDriver: true,
     }).start(() => {
-      setCurrentStep((prev) => prev - 1);
+      callback();
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 200,
@@ -227,7 +176,157 @@ export default function SurveyScreen() {
     });
   };
 
-  const isLastStep = currentStep === totalSteps - 1;
+  const handleSelect = (option: string) => {
+    if (Platform.OS !== "web") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+
+    if (isQ7Step) {
+      // 시/도 변경 시 시/군/구 초기화
+      setAnswers((prev) => ({ ...prev, Q7: option, Q8: "" }));
+      return;
+    }
+    if (isQ8Step) {
+      setAnswers((prev) => ({ ...prev, Q8: option }));
+      return;
+    }
+
+    if (!currentQuestion || !questionKey) return;
+    const maxSelect = currentQuestion.maxSelect;
+
+    if (maxSelect === 1) {
+      setAnswers((prev) => ({ ...prev, [questionKey]: option }));
+    } else {
+      setAnswers((prev) => {
+        const current = (prev[questionKey] as string[]) ?? [];
+        if (current.includes(option)) {
+          return { ...prev, [questionKey]: current.filter((o) => o !== option) };
+        } else if (current.length < maxSelect) {
+          return { ...prev, [questionKey]: [...current, option] };
+        }
+        return prev;
+      });
+    }
+  };
+
+  const handleNext = async () => {
+    if (!isAnswered) return;
+    if (Platform.OS !== "web") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+
+    if (isLastStep) {
+      fadeTransition(async () => {
+        await AsyncStorage.setItem("surveyAnswers", JSON.stringify(answers));
+        // @ts-ignore
+        router.push("/loading");
+      });
+    } else {
+      fadeTransition(() => {
+        setCurrentStep((prev) => prev + 1);
+      });
+    }
+  };
+
+  const handleBack = () => {
+    if (currentStep === 0) {
+      // @ts-ignore
+      router.back();
+      return;
+    }
+    fadeTransition(() => {
+      setCurrentStep((prev) => prev - 1);
+    });
+  };
+
+  // 현재 단계 렌더링할 선택지
+  const renderOptions = () => {
+    if (isQ7Step) {
+      return SIDO_LIST.map((sido) => {
+        const isSelected = answers.Q7 === sido;
+        return (
+          <Pressable
+            key={sido}
+            onPress={() => handleSelect(sido)}
+            style={({ pressed }) => [
+              styles.optionCard,
+              {
+                backgroundColor: isSelected ? "#D4A574" : "#FFFFFF",
+                borderColor: isSelected ? "#D4A574" : "#E8D4B8",
+                borderWidth: 1.5,
+              },
+              pressed && { opacity: 0.8, transform: [{ scale: 0.98 }] },
+            ]}
+          >
+            <Text style={[styles.optionLabel, { color: isSelected ? "#FFFFFF" : "#5C3D2E" }]}>
+              {sido}
+            </Text>
+          </Pressable>
+        );
+      });
+    }
+
+    if (isQ8Step) {
+      return sigunguOptions.map((sigungu) => {
+        const isSelected = answers.Q8 === sigungu;
+        return (
+          <Pressable
+            key={sigungu}
+            onPress={() => handleSelect(sigungu)}
+            style={({ pressed }) => [
+              styles.optionCard,
+              {
+                backgroundColor: isSelected ? "#D4A574" : "#FFFFFF",
+                borderColor: isSelected ? "#D4A574" : "#E8D4B8",
+                borderWidth: 1.5,
+              },
+              pressed && { opacity: 0.8, transform: [{ scale: 0.98 }] },
+            ]}
+          >
+            <Text style={[styles.optionLabel, { color: isSelected ? "#FFFFFF" : "#5C3D2E" }]}>
+              {sigungu}
+            </Text>
+          </Pressable>
+        );
+      });
+    }
+
+    // Q1~Q6
+    return (currentQuestion?.options ?? []).map((option) => {
+      const isSelected = selectedArray.includes(option.label);
+      return (
+        <Pressable
+          key={option.label}
+          onPress={() => handleSelect(option.label)}
+          style={({ pressed }) => [
+            styles.optionCard,
+            {
+              backgroundColor: isSelected ? "#D4A574" : "#FFFFFF",
+              borderColor: isSelected ? "#D4A574" : "#E8D4B8",
+              borderWidth: 1.5,
+            },
+            pressed && { opacity: 0.8, transform: [{ scale: 0.98 }] },
+          ]}
+        >
+          <Text style={[styles.optionLabel, { color: isSelected ? "#FFFFFF" : "#5C3D2E" }]}>
+            {option.label}
+          </Text>
+        </Pressable>
+      );
+    });
+  };
+
+  const questionText = isQ7Step
+    ? "근무 희망\n지역은 어디인가요?"
+    : isQ8Step
+    ? `${answers.Q7}\n어느 구/군인가요?`
+    : currentQuestion?.question ?? "";
+
+  const hintText = isQ7Step || isQ8Step
+    ? "1개 선택"
+    : currentQuestion?.id === "Q6"
+    ? "없을 시 다음을 눌러주세요"
+    : `${currentQuestion?.maxSelect}개까지 선택 가능`;
 
   return (
     <ScreenContainer
@@ -247,7 +346,7 @@ export default function SurveyScreen() {
           <Text style={styles.backArrow}>←</Text>
         </Pressable>
         <Text style={styles.stepText}>
-          {currentStep + 1} / {totalSteps}
+          {currentStep + 1} / {TOTAL_STEPS}
         </Text>
         <View style={styles.backButton} />
       </View>
@@ -274,79 +373,31 @@ export default function SurveyScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
-          {/* 질문 */}
           <View style={styles.questionHeader}>
-            <Text style={styles.questionText}>
-              {currentQuestion.question}
-            </Text>
-            <Text style={styles.hintText}>
-              {currentQuestion.id === "Q6"
-                ? "없을 시 다음을 눌러주세요"
-                : `${currentQuestion.maxSelect}개까지 선택 가능`}
-            </Text>
+            <Text style={styles.questionText}>{questionText}</Text>
+            <Text style={styles.hintText}>{hintText}</Text>
           </View>
 
-          {/* 선택지 */}
           <View style={styles.optionsContainer}>
-            {currentQuestion.options.map((option) => {
-              const isSelected = selectedArray.includes(option.label);
-              return (
-                <Pressable
-                  key={option.label}
-                  onPress={() => handleSelect(option.label)}
-                  style={({ pressed }) => [
-                    styles.optionCard,
-                    {
-                      backgroundColor: isSelected ? "#D4A574" : "#FFFFFF",
-                      borderColor: isSelected ? "#D4A574" : "#E8D4B8",
-                      borderWidth: 1.5,
-                    },
-                    pressed && { opacity: 0.8, transform: [{ scale: 0.98 }] },
-                  ]}
-                >
-                  <Text style={[
-                    styles.optionLabel,
-                    { color: isSelected ? "#FFFFFF" : "#5C3D2E" },
-                  ]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+            {renderOptions()}
           </View>
 
-          {/* 하단 여백 */}
           <View style={{ height: 24 }} />
         </ScrollView>
       </Animated.View>
 
-      {/* 다음 버튼 (고정) */}
-      <View
-        style={[
-          styles.bottomBar,
-          { backgroundColor: "#FFFFFF", borderTopColor: "#E8D4B8" },
-        ]}
-      >
+      {/* 다음 버튼 */}
+      <View style={[styles.bottomBar, { backgroundColor: "#FFFFFF", borderTopColor: "#E8D4B8" }]}>
         <Pressable
           onPress={handleNext}
           disabled={!isAnswered}
           style={({ pressed }) => [
             styles.nextButton,
-            {
-              backgroundColor: isAnswered ? "#D4A574" : "#D4C4B0",
-            },
-            pressed && isAnswered && {
-              opacity: 0.85,
-              transform: [{ scale: 0.97 }],
-            },
+            { backgroundColor: isAnswered ? "#D4A574" : "#D4C4B0" },
+            pressed && isAnswered && { opacity: 0.85, transform: [{ scale: 0.97 }] },
           ]}
         >
-          <Text
-            style={[
-              styles.nextButtonText,
-              { color: isAnswered ? "#FFFFFF" : "#8B6F47" },
-            ]}
-          >
+          <Text style={[styles.nextButtonText, { color: isAnswered ? "#FFFFFF" : "#8B6F47" }]}>
             {isLastStep ? "결과 보기" : "다음"}
           </Text>
         </Pressable>
@@ -424,7 +475,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 20,
     borderRadius: 18,
-    minHeight: 76,
+    minHeight: 68,
   },
   optionLabel: {
     fontSize: 22,

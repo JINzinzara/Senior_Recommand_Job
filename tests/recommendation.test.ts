@@ -10,7 +10,7 @@ describe("surveyToNCS", () => {
       Q3: "가볍게 걷기",
       Q4: "실내",
       Q5: "4~5일",
-      Q6: [],
+      Q6: [], Q7: "서울특별시", Q8: "강남구",
     };
     const result = surveyToNCS(answers);
     expect(result.candidateCodes.length).toBeGreaterThan(0);
@@ -28,7 +28,7 @@ describe("surveyToNCS", () => {
       Q3: "주로 앉아서",
       Q4: "실내",
       Q5: "짧게",
-      Q6: [],
+      Q6: [], Q7: "서울특별시", Q8: "강남구",
     };
     const result = surveyToNCS(answers);
     // 농업 코드가 없어야 함
@@ -45,7 +45,7 @@ describe("surveyToNCS", () => {
       Q3: "가볍게 걷기",
       Q4: "실내",
       Q5: "4~5일",
-      Q6: ["요양보호사 자격증"],
+      Q6: ["요양보호사 자격증"], Q7: "서울특별시", Q8: "강남구",
     };
     const result = surveyToNCS(answers);
     // 요양보호사 관련 코드에 부스트가 있어야 함
@@ -59,7 +59,7 @@ describe("surveyToNCS", () => {
       Q3: "가볍게 걷기",
       Q4: "실내",
       Q5: "4~5일",
-      Q6: [],
+      Q6: [], Q7: "서울특별시", Q8: "강남구",
     };
     const result = surveyToNCS(answers);
     expect(result.attitudeKeywords.length).toBeGreaterThan(0);
@@ -74,7 +74,7 @@ describe("buildPrompt", () => {
       Q3: "가볍게 걷기",
       Q4: "실내",
       Q5: "4~5일",
-      Q6: ["요양보호사 자격증"],
+      Q6: ["요양보호사 자격증"], Q7: "서울특별시", Q8: "강남구",
     };
     const ncsResult = surveyToNCS(answers);
     const prompt = buildPrompt(answers, ncsResult, [], []);
@@ -90,7 +90,7 @@ describe("buildPrompt", () => {
       Q3: "야외 활동 가능",
       Q4: "실외",
       Q5: "짧게",
-      Q6: [],
+      Q6: [], Q7: "서울특별시", Q8: "강남구",
     };
     const ncsResult = surveyToNCS(answers);
     const prompt = buildPrompt(answers, ncsResult, [], []);

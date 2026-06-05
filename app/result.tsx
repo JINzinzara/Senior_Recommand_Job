@@ -7,6 +7,8 @@ import {
   Platform,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Linking,
+  Alert,
 } from "react-native";
 import { Text } from "@/components/text";
 import { useRouter } from "expo-router";
@@ -227,6 +229,36 @@ function JobCard({
   accentColor: string;
   colors: ReturnType<typeof useColors>;
 }) {
+  const handleApply = () => {
+    if (Platform.OS !== "web") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+
+    if (job.contTel) {
+      // 전화번호 있으면 전화/문자 선택
+      Alert.alert(
+        job.채용공고명,
+        `📞 ${job.contTel}`,
+        [
+          {
+            text: "전화하기",
+            onPress: () => Linking.openURL(`tel:${job.contTel}`),
+          },
+          {
+            text: "문자 보내기",
+            onPress: () => Linking.openURL(`sms:${job.contTel}`),
+          },
+          { text: "취소", style: "cancel" },
+        ]
+      );
+    } else if (job.링크) {
+      // 전화번호 없으면 공고 페이지 이동
+      Linking.openURL(job.링크);
+    } else {
+      Alert.alert("안내", "지원 정보를 찾을 수 없습니다.");
+    }
+  };
+
   return (
     <View style={[styles.card, { width: CARD_WIDTH, marginHorizontal: CARD_MARGIN / 2 }]}>
       {/* 카드 내부 */}
@@ -272,28 +304,22 @@ function JobCard({
             </Text>
           </View>
 
-          {/* 일치율 */}
-          {job.matchRate !== undefined && (
-            <View style={styles.matchRateContainer}>
-              <Text style={[styles.matchRateLabel, { color: "#8B6F47" }]}>
-                일치율
-              </Text>
-              <View style={styles.matchRateBar}>
-                <View
-                  style={[
-                    styles.matchRateFill,
-                    {
-                      backgroundColor: accentColor,
-                      width: `${job.matchRate}%`,
-                    },
-                  ]}
-                />
-              </View>
-              <Text style={[styles.matchRateValue, { color: accentColor }]}>
-                {job.matchRate}%
-              </Text>
-            </View>
-          )}
+        </View>
+
+        {/* 지원하기 버튼 */}
+        <View style={styles.applyContainer}>
+          <Pressable
+            onPress={handleApply}
+            style={({ pressed }) => [
+              styles.applyButton,
+              { backgroundColor: accentColor },
+              pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
+            ]}
+          >
+            <Text style={styles.applyButtonText}>
+              {job.contTel ? "📞 지원하기" : "📋 공고 보기"}
+            </Text>
+          </Pressable>
         </View>
 
         {/* 카드 하단 카운터 */}
@@ -463,32 +489,21 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     fontWeight: "600",
   },
-  matchRateContainer: {
-    flexDirection: "row",
+  applyContainer: {
+    paddingHorizontal: 22,
+    paddingBottom: 16,
+  },
+  applyButton: {
+    height: 58,
+    borderRadius: 16,
     alignItems: "center",
-    gap: 12,
+    justifyContent: "center",
   },
-  matchRateLabel: {
-    fontSize: 14,
+  applyButtonText: {
+    color: "#FFFFFF",
+    fontSize: 20,
     fontWeight: "700",
-    width: 42,
-  },
-  matchRateBar: {
-    flex: 1,
-    height: 10,
-    backgroundColor: "#E8D4B8",
-    borderRadius: 5,
-    overflow: "hidden",
-  },
-  matchRateFill: {
-    height: "100%",
-    borderRadius: 5,
-  },
-  matchRateValue: {
-    fontSize: 16,
-    fontWeight: "700",
-    width: 42,
-    textAlign: "right",
+    letterSpacing: 0.3,
   },
   cardFooter: {
     flexDirection: "row",

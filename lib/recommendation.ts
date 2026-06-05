@@ -1,5 +1,13 @@
 // 시니어 일자리 추천 로직 - Python 노트북에서 TypeScript로 포팅
-import { extractRegionFromText } from "./location";
+
+// 근무지역 텍스트에서 시/도 이름 추출
+function extractRegionFromText(address: string): string {
+  const regions = ["서울", "인천", "경기", "부산", "대구", "광주", "대전", "울산", "강원", "충북", "충남", "경북", "경남", "전북", "전남", "제주", "세종"];
+  for (const r of regions) {
+    if (address.includes(r)) return r;
+  }
+  return "";
+}
 
 export type SurveyAnswers = {
   Q1: string[];
@@ -8,6 +16,8 @@ export type SurveyAnswers = {
   Q4: string;
   Q5: string;
   Q6: string[];
+  Q7: string; // 시/도
+  Q8: string; // 시/군/구
 };
 
 export type NCSResult = {
@@ -24,6 +34,8 @@ export type JobRecommendation = {
   모집요강: string;
   reason: string;
   matchRate?: number;
+  링크?: string;
+  contTel?: string;
 };
 
 export type RawJob = {
@@ -34,6 +46,7 @@ export type RawJob = {
   모집요강: string;
   모집직종: string;
   링크: string;
+  contTel: string;
 };
 
 // NCS 직종 레지스트리
@@ -104,6 +117,21 @@ export const CATEGORY_GROUP_MAP: Record<string, string> = {
   "식품공학 기술자 및 연구원":                  "식품가공",
   "기타 제조 관련 단순 종사원":                 "식품가공",
   "CNC 밀링기 조작원(NC 밀링기 조작원)":        "식품가공",
+
+  // 원더풀시니어 카테고리 추가
+  "서비스":           "시장·판매",
+  "공공·복지":        "돌봄·복지",
+  "의료":             "돌봄·복지",
+  "교육":             "교육·문화",
+  "영업·판매·무역":   "시장·판매",
+  "총무·법무·사무":   "행정·사무",
+  "회계·세무·재무":   "행정·사무",
+  "고객상담·TM":      "행정·사무",
+  "인사·노무·HRD":    "행정·사무",
+  "기획·전략":        "행정·사무",
+  "구매·자재·물류":   "행정·사무",
+  "생산":             "식품가공",
+  "미디어·문화·스포츠": "교육·문화",
 };
 
 // Q1 태도 키워드 매핑
@@ -156,6 +184,9 @@ const Q2_NCS_CODE_MAP: Record<string, string[]> = {
 const Q6_BOOST_MAP: Record<string, { codes: string[]; boost: number }> = {
   "요양보호사 자격증": { codes: ["06010108", "07010202"], boost: 0.15 },
   "사회복지사 1급/2급 자격증": { codes: ["07010205", "04020202", "07020202"], boost: 0.15 },
+  "한식조리기능사": { codes: ["13010100", "13010101"], boost: 0.15 },
+  "운전면허": { codes: ["11010101"], boost: 0.10 },
+  "경비원 신임교육 이수": { codes: ["11010101"], boost: 0.15 },
 };
 
 const OUTDOOR_GROUPS = new Set(["농업", "환경·청소", "경비·안전"]);
@@ -234,8 +265,13 @@ export function filterJobs(
   const unmapped: RawJob[] = [];
 
   for (const job of jobs) {
-    const jobGroup = CATEGORY_GROUP_MAP[job.모집직종] ?? "";
-    if (jobGroup && targetGroups.has(jobGroup)) {
+    // 콤마로 구분된 다중 직종 처리 (원더풀시니어 형식)
+    const categories = job.모집직종.split(",").map((c) => c.trim());
+    const matchedGroup = categories
+      .map((cat) => CATEGORY_GROUP_MAP[cat] ?? "")
+      .find((g) => g && targetGroups.has(g));
+
+    if (matchedGroup) {
       mapped.push(job);
     } else {
       unmapped.push(job);
@@ -245,15 +281,24 @@ export function filterJobs(
   return { mapped, unmapped };
 }
 
-// 사용자 위치 기반으로 mapped/unmapped 내부 정렬
-// 같은 시/도 공고를 앞으로 배치 — 나중에 실제 거리 계산 API로 교체 가능
-export function sortJobsByRegion(jobs: RawJob[], userRegion: string): RawJob[] {
-  if (!userRegion || userRegion === "전국") return jobs;
-  return [...jobs].sort((a, b) => {
-    const aMatch = extractRegionFromText(a.근무지역) === userRegion ? 0 : 1;
-    const bMatch = extractRegionFromText(b.근무지역) === userRegion ? 0 : 1;
-    return aMatch - bMatch;
-  });
+// 사용자 위치 기반으로 공고 정렬 (구/군 일치 > 시/도 일치 > 그 외)
+export function sortJobsByRegion(
+  jobs: RawJob[],
+  userSido: string,   // 예: "서울"
+  userSigungu?: string // 예: "마포구"
+): RawJob[] {
+  if (!userSido) return jobs;
+
+  const score = (job: RawJob): number => {
+    const addr = job.근무지역;
+    const sidoMatch = extractRegionFromText(addr) === userSido;
+    const sigunguMatch = userSigungu ? addr.includes(userSigungu) : false;
+    if (sigunguMatch) return 0; // 구까지 일치 — 최우선
+    if (sidoMatch) return 1;   // 시/도만 일치
+    return 2;                  // 불일치
+  };
+
+  return [...jobs].sort((a, b) => score(a) - score(b));
 }
 
 // 중복 공고 제거
@@ -272,11 +317,12 @@ export function buildPrompt(
   answers: SurveyAnswers,
   ncsResult: NCSResult,
   mappedJobs: RawJob[],
-  unmappedJobs: RawJob[],
-  userRegion?: string
+  unmappedJobs: RawJob[]
 ): string {
   const certText = answers.Q6.length > 0 ? answers.Q6.join(", ") : "없음";
-  const regionText = userRegion && userRegion !== "전국" ? userRegion : undefined;
+  const regionText = answers.Q8 && answers.Q8 !== "전체"
+    ? `${answers.Q7} ${answers.Q8}`
+    : answers.Q7 || undefined;
 
   const mappedText = mappedJobs
     .map((j) => `- ${j.채용공고명} / ${j.모집직종} / ${j.근무형태} / ${j.근무지역.slice(0, 30)}`)
@@ -305,9 +351,9 @@ ${mappedText}
 ${unmappedText}
 
 ## 지침
-1. 고령자분의 성격, 관심사, 신체 활동량, 보유 자격증을 종합적으로 고려하세요.${regionText ? `\n2. 현재 위치(${regionText})와 근무지역이 가까운 공고를 우선 추천하세요.` : ""}
+1. 고령자분의 성격, 관심사, 신체 활동량, 보유 자격증을 종합적으로 고려하세요.${regionText ? `\n2. 반드시 근무지역이 "${regionText}" 또는 인근 지역인 공고만 추천하세요. 해당 지역 공고가 부족할 경우에만 같은 시/도 내 다른 구 공고를 포함하세요.` : ""}
 ${regionText ? "3" : "2"}. 자격증 보유 표시가 있는 직종은 우선적으로 검토하세요.
-${regionText ? "4" : "3"}. 설문 응답과 공고 간의 일치율을 계산하여 일치율이 높은 공고 최대 5개를 제시하세요. 적합한 공고가 적으면 그 수만큼만 추천하세요.
+${regionText ? "4" : "3"}. 설문 응답과 공고 간의 일치도를 내부적으로 계산하여 가장 적합한 공고 최대 5개를 선정하세요. 적합한 공고가 적으면 그 수만큼만 추천하세요.
 ${regionText ? "5" : "4"}. 추천 이유는 한 문장으로 간결하게 작성하세요 (20~30글자 이내).
 ${regionText ? "6" : "5"}. 추천 이유에서 근무 일수나 시간은 제외하세요.
 ${regionText ? "7" : "6"}. '직종 미분류' 공고도 설문 응답과 직접 비교해서 적합하다고 판단되면 추천 목록에 포함하세요.
@@ -315,8 +361,8 @@ ${regionText ? "8" : "7"}. 반드시 아래 JSON 형식으로만 답변하세요
 
 {
   "recommendations": [
-    {"rank": 1, "채용공고명": "공고제목", "모집직종": "직종명", "모집요강": "근무 일수", "reason": "추천 이유", "matchRate": 95},
-    {"rank": 2, "채용공고명": "공고제목", "모집직종": "직종명", "모집요강": "근무 일수", "reason": "추천 이유", "matchRate": 85}
+    {"rank": 1, "채용공고명": "공고제목", "모집직종": "직종명", "모집요강": "근무 일수", "reason": "추천 이유"},
+    {"rank": 2, "채용공고명": "공고제목", "모집직종": "직종명", "모집요강": "근무 일수", "reason": "추천 이유"}
   ]
 }`;
 }

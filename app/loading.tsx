@@ -88,11 +88,6 @@ export default function LoadingScreen() {
         }
         const answers = JSON.parse(stored);
 
-        const locRaw = await AsyncStorage.getItem("userLocation");
-        const location = locRaw
-          ? (JSON.parse(locRaw) as { latitude: number; longitude: number })
-          : undefined;
-
         // 30초 타임아웃 — 서버 무응답 시 결과 화면으로 이동
         const timeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("timeout")), 30000)
@@ -106,7 +101,8 @@ export default function LoadingScreen() {
             Q4: answers.Q4 ?? "상관없음",
             Q5: answers.Q5 ?? "4~5일",
             Q6: answers.Q6 ?? [],
-            location,
+            Q7: answers.Q7 ?? "",
+            Q8: answers.Q8 ?? "",
           }),
           timeoutPromise,
         ]);

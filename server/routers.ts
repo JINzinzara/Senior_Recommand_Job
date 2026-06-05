@@ -13,7 +13,6 @@ import {
   type JobRecommendation,
   type RawJob,
 } from "../lib/recommendation";
-import { reverseGeocode, type Coords } from "../lib/location";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -22,7 +21,7 @@ let _jobsCache: RawJob[] | null = null;
 function loadJobs(): RawJob[] {
   if (_jobsCache) return _jobsCache;
   try {
-    const raw = readFileSync(join(__dirname, "data/jobs.json"), "utf-8");
+    const raw = readFileSync(join(process.cwd(), "server/data/jobs.json"), "utf-8");
     _jobsCache = JSON.parse(raw) as RawJob[];
   } catch {
     _jobsCache = [];
@@ -43,29 +42,24 @@ export const appRouter = router({
           Q4: z.string(),
           Q5: z.string(),
           Q6: z.array(z.string()),
-          location: z
-            .object({ latitude: z.number(), longitude: z.number() })
-            .optional(),
+          Q7: z.string(), // 시/도
+          Q8: z.string(), // 시/군/구
         })
       )
       .mutation(async ({ input }) => {
-        const { location, ...surveyFields } = input;
-        const answers: SurveyAnswers = surveyFields;
+        const answers: SurveyAnswers = input;
         const ncsResult = surveyToNCS(answers);
 
-        // 위치가 있으면 시/도 이름으로 변환 (API 교체 시 이 부분만 변경)
-        const userRegion = location
-          ? await reverseGeocode(location as Coords)
-          : undefined;
-
-        // 실제 공고 로드 → 중복 제거 → 필터링 → 위치순 정렬
+        // 실제 공고 로드 → 중복 제거 → 필터링 → 선택 지역 우선 정렬
         const allJobs = deduplicateJobs(loadJobs());
         const { mapped, unmapped } = filterJobs(allJobs, ncsResult);
-        const sortedMapped = userRegion ? sortJobsByRegion(mapped, userRegion) : mapped;
-        const sortedUnmapped = userRegion ? sortJobsByRegion(unmapped, userRegion) : unmapped;
+        const userRegionKeyword = answers.Q7.replace(/특별시|광역시|특별자치시|특별자치도|도$/, "").trim();
+        const sigungu = answers.Q8 === "전체" ? undefined : answers.Q8;
+        const sortedMapped = sortJobsByRegion(mapped, userRegionKeyword, sigungu);
+        const sortedUnmapped = sortJobsByRegion(unmapped, userRegionKeyword, sigungu);
 
         // 토큰 절약: mapped 최대 20개, unmapped 최대 10개
-        const prompt = buildPrompt(answers, ncsResult, sortedMapped.slice(0, 20), sortedUnmapped.slice(0, 10), userRegion);
+        const prompt = buildPrompt(answers, ncsResult, sortedMapped.slice(0, 20), sortedUnmapped.slice(0, 10));
 
         try {
           const client = new Anthropic({ apiKey: ENV.anthropicApiKey });
@@ -86,22 +80,32 @@ export const appRouter = router({
             parsed = { recommendations: [] };
           }
 
+          // 공고명으로 원본 데이터에서 링크·전화번호 매칭
+          const allJobsForMatch = loadJobs();
+          const findOriginalJob = (name: string) =>
+            allJobsForMatch.find((j) => j.채용공고명 === name);
+
           const recommendations = (parsed.recommendations ?? [])
             .filter((item: any) =>
               item?.rank && item?.채용공고명 && item?.모집직종 && item?.모집요강 && item?.reason
             )
             .slice(0, 5)
-            .map((item: any, idx: number) => ({
-              rank: idx + 1,
-              채용공고명: String(item.채용공고명 || ""),
-              모집직종: String(item.모집직종 || ""),
-              모집요강: String(item.모집요강 || ""),
-              reason: String(item.reason || ""),
-              matchRate:
-                typeof item.matchRate === "number"
-                  ? Math.min(100, Math.max(0, item.matchRate))
-                  : undefined,
-            }));
+            .map((item: any, idx: number) => {
+              const original = findOriginalJob(String(item.채용공고명 || ""));
+              return {
+                rank: idx + 1,
+                채용공고명: String(item.채용공고명 || ""),
+                모집직종: String(item.모집직종 || ""),
+                모집요강: String(item.모집요강 || ""),
+                reason: String(item.reason || ""),
+                matchRate:
+                  typeof item.matchRate === "number"
+                    ? Math.min(100, Math.max(0, item.matchRate))
+                    : undefined,
+                링크: original?.링크 || "",
+                contTel: original?.contTel || "",
+              };
+            });
 
           const candidateGroups = [
             ...new Set(
