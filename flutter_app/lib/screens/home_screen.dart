@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'survey_screen.dart';
+import 'voice_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -97,29 +98,60 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-            child: SizedBox(
-              width: double.infinity,
-              height: 68,
-              child: ElevatedButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SurveyScreen()),
+            child: Column(
+              children: [
+                // 설문으로 시작
+                SizedBox(
+                  width: double.infinity,
+                  height: 68,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SurveyScreen()),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFD4A574),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18)),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      '📋  설문으로 시작',
+                      style: TextStyle(
+                          fontFamily: 'JalnanGothic',
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
                 ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFD4A574),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18)),
-                  elevation: 0,
+                const SizedBox(height: 12),
+                // 음성으로 시작
+                SizedBox(
+                  width: double.infinity,
+                  height: 68,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const VoiceScreen()),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFF5E6D3),
+                      foregroundColor: const Color(0xFF5C3D2E),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18)),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      '🎤  음성으로 시작',
+                      style: TextStyle(
+                          fontFamily: 'JalnanGothic',
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
                 ),
-                child: const Text(
-                  '설문 시작',
-                  style: TextStyle(
-                      fontFamily: 'JalnanGothic',
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold),
-                ),
-              ),
+              ],
             ),
           ),
         ],
